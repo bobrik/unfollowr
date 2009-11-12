@@ -243,7 +243,7 @@ class Unfollowr:
 			if not loglevel in ['debug', 'warning', 'info']:
 				raise
 			Logger().set_loglevel(loglevel)
-		except IOError:
+		except:
 			pass
 		# configuring credentails
 		self.user = config.get('unfollowr', 'username')
