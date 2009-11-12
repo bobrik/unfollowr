@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2.6
 # -*- coding: utf-8 -*-
 
 # unfollowr bot to calculate unfollows and dm users about them
@@ -19,6 +19,8 @@
 # along with this program; see the file COPYING.  If not, write to
 # the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 # Boston, MA 02111-1307, USA.
+
+# WARNING: python-2.6 required because of json module
 
 import os
 import urllib
