@@ -156,8 +156,6 @@ class Twitter:
 				exit()
 			except ValueError:
 				Logger().warning('Wrong JSON data from twitter. Trying again')
-				print jsondata
-				print url
 			except IOError, error_code:
 				if error_code[0] == "http error":
 					if error_code[1] == 404:
@@ -257,8 +255,6 @@ class Unfollowr:
 		# datadir creation
 		if not os.path.exists(os.path.join(os.path.dirname(__file__), 'followers')):
 			os.mkdir(os.path.join(os.path.dirname(__file__), 'followers'))
-		else:
-			print os.path.join(os.path.dirname(__file__), 'followers')
 
 	def start(self):
 		while True:
