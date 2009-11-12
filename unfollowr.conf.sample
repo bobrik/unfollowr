@@ -1,0 +1,7 @@
+# rename that file to unfollowr.conf and set auth info to use unfollowr
+[unfollowr]
+username=
+password=
+
+[logger]
+loglevel=debug
