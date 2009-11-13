@@ -82,11 +82,12 @@ class Logger(object):
 
 
 class Twitter:
-	user = None
+	"""Twitter API communication class."""
+	user     = None
 	password = None
 	api_opener = None
-	min_available_api_requests = 10
 	check_rate_limit = False
+	min_available_api_requests = 10
 	rate_checking_sleep = 120
 	request_sleep = 1
 
@@ -96,6 +97,7 @@ class Twitter:
 		self.api_opener = urllib.URLopener()
 
 	def send_notification(self, user_id, message):
+		"""Send direct message to user_id"""
 		url = 'http://%s:%s@twitter.com/direct_messages/new.json' % (self.user, self.password)
 		data = {'user_id': user_id, 'text': message}
 		while True:
@@ -111,6 +113,7 @@ class Twitter:
 				Logger().warning('Oops, something wrong with twitter communication. Trying again')
 
 	def verify_credentials(self):
+		"""Verify is user credentails correct"""
 		url = 'http://%s:%s@twitter.com/account/verify_credentials.json' % (self.user, self.password)
 		if self.get_api_data(url) == {}:
 			return False
@@ -118,10 +121,12 @@ class Twitter:
 			return True
 
 	def get_followers(self, user):
+		"""Get user followers list with ids"""
 		url = 'http://%s:%s@twitter.com/followers/ids/%s.json' % (self.user, self.password, user)
 		return self.get_api_data(url)
 
 	def get_screen_name(self, user_id):
+		"""Get user screen_name by id"""
 		url = 'http://%s:%s@twitter.com/users/show/%d.json' % (self.user, self.password, int(user_id))
 		data = self.get_api_data(url)
 		if data.has_key('screen_name'):
@@ -131,6 +136,7 @@ class Twitter:
 			return ''
 
 	def check_hourly_limit(self):
+		"""Check is hourly request limit reached and waits for new requests"""
 		url = 'http://%s:%s@twitter.com/account/rate_limit_status.json' % (self.user, self.password)
 		while True:
 			data = self.get_api_data(url, True)
@@ -141,6 +147,7 @@ class Twitter:
 				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['hourly_limit'], self.rate_checking_sleep))
 
 	def get_api_data(self, url, unlimited=False):
+		"""Internal method to get decoded JSON data from API"""
 		path = url[url.find('/', 10):]
 		while True:
 			try:
@@ -173,6 +180,7 @@ class Twitter:
 
 
 class User:
+	"""Twittter user class to work with followers"""
 	def __init__(self, id):
 		self.id = id
 
@@ -183,6 +191,7 @@ class User:
 		return 'followers/'+str(self.id)+'.list'
 
 	def calculate(self, followers):
+		"""Calculate user unfollows and save followers list"""
 		if len(followers) > 0:
 			unfollows = self.get_unfollows(followers)
 			self.update(followers)
@@ -192,6 +201,7 @@ class User:
 			return []
 
 	def get_unfollows(self, followers):
+		"""Return user unfollows"""
 		unfollows = []
 		past_followers = self.get_past_followers()
 		for past_follower in past_followers:
@@ -200,6 +210,7 @@ class User:
 		return unfollows
 
 	def get_past_followers(self):
+		"""Read user followers from file and return as list"""
 		followers_list = []
 		try:
 			followers_file = open(self.get_filename())
@@ -214,12 +225,14 @@ class User:
 		return followers_list
 
 	def update(self, followers):
+		"""Write user followers to file"""
 		followers_file = open(self.get_filename(), 'w+')
 		for follower in followers:
 			followers_file.write(str(follower)+'\n')
 		followers_file.close()
 
 	def append_followers(self, followers):
+		"""Append additional user followers and save full list"""
 		past_followers = self.get_past_followers()
 		Logger().debug('There was %d followers for %s' % (len(past_followers), self.id))
 		past_followers += followers
@@ -228,6 +241,7 @@ class User:
 
 
 class Unfollowr:
+	"""Unfollowr application class"""
 	iterations_sleep = 2400
 	twitter = None
 
@@ -259,6 +273,7 @@ class Unfollowr:
 			os.mkdir(os.path.join(os.path.dirname(__file__), 'followers'))
 
 	def start(self):
+		"""Main application loop"""
 		while True:
 			followers = self.twitter.get_followers(self.user)
 			i = 0
@@ -281,17 +296,20 @@ class Unfollowr:
 			time.sleep(self.iterations_sleep)
 
 	def calculate_user(self, user):
+		"""Calculate user unfollows"""
 		user = User(user)
 		user_followers = self.twitter.get_followers(user.id)
 		unfollows = user.calculate(user_followers)
 		return unfollows
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
+		"""Send message to user about unfollows"""
 		message = 'Tweeps that no longer following you: '
 		for pack in self.split_to_packs(user_unfollowers):
 			self.twitter.send_notification(user, message+pack)
 
 	def split_to_packs(self, data, max_pack_length=90):
+		"""Split usernames to pack to make direct messages shorter than 140 chars"""
 		data = copy.copy(data) # we don't want to affect on data
 		packs = []
 		while len(data) > 0:
