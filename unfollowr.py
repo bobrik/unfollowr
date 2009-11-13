@@ -276,10 +276,8 @@ class Unfollowr:
 		"""Main application loop"""
 		while True:
 			followers = self.twitter.get_followers(self.user)
-			i = 0
-			for user in followers:
-				i += 1
-				Logger().info('Calculating for user #%d from %d' % (i, len(followers)))
+			for i, user in enumerate(followers):
+				Logger().info('Calculating for user #%d from %d' % (i+1, len(followers)))
 				user_unfollowers = self.calculate_user(user)
 				named_user_unfollowers = []
 				unnamed_user_unfollowers = []
