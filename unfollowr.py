@@ -48,11 +48,11 @@ class Logger(object):
 	def set_loglevel(self, loglevel):
 		levels = {'info': 1, 'warning': 2, 'debug': 3}
 		self.show_info = True
-		if levels[loglevel] > levels['warning']:
+		if levels[loglevel] >= levels['warning']:
 			self.show_warnings = True
 		else:
 			self.show_warnings = False
-		if levels[loglevel] > levels['debug']:
+		if levels[loglevel] >= levels['debug']:
 			self.show_debug = True
 		else:
 			self.show_debug = False
@@ -288,6 +288,8 @@ class Unfollowr:
 					else:
 						# FIXME: do we need to store them? mostly spammers
 						unnamed_user_unfollowers.append(unfollower)
+				if len(unnamed_user_unfollowers) > 0:
+					named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
 				Logger().debug('Unfollows for '+str(user)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
 				self.send_unfollowed_notifications(user, named_user_unfollowers)
 			Logger().info('Sleeping befoge next iteration for %d seconds' % self.iterations_sleep)
