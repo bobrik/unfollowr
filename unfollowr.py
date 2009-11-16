@@ -140,11 +140,12 @@ class Twitter:
 		url = 'http://%s:%s@twitter.com/account/rate_limit_status.json' % (self.user, self.password)
 		while True:
 			data = self.get_api_data(url, True)
-			if data['hourly_limit'] > self.min_available_api_requests:
-				Logger().debug('Twitter api rate limit checking ok, %d requests remaining' % data['hourly_limit'])
+			if data['remaining_hits'] > self.min_available_api_requests:
+				Logger().debug('Twitter api rate limit checking ok, %d requests remaining' % data['remaining_hits'])
 				return
 			else:
-				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['hourly_limit'], self.rate_checking_sleep))
+				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['remaining_hits'], self.rate_checking_sleep))
+				time.sleep(self.rate_checking_sleep)
 
 	def get_api_data(self, url, unlimited=False):
 		"""Internal method to get decoded JSON data from API"""
