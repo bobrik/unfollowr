@@ -76,9 +76,8 @@ class Logger(object):
 		event_line = self.timestamp()+' '+message
 		if self.print_events:
 			print event_line
-		f = open(self.logfile, 'a')
-		f.write(event_line+'\n')
-		f.close()
+		with open(self.logfile, 'a') as log:
+			log.write(event_line+'\n')
 
 
 class Twitter:
@@ -188,56 +187,44 @@ class User:
 	def get_id(self):
 		return self.id
 
-	def get_filename(self):
-		return 'followers/'+str(self.id)+'.list'
-
-	def calculate(self, followers):
-		"""Calculate user unfollows and save followers list"""
-		if len(followers) > 0:
-			unfollows = self.get_unfollows(followers)
-			self.update(followers)
-			return unfollows
-		else:
-			Logger().debug('Empty followers list for user %s, skipping' % self.id)
-			return []
+	def get_filename(self, prefix):
+		return prefix+'/'+str(self.id)+'.list'
 
 	def get_unfollows(self, followers):
 		"""Return user unfollows"""
 		unfollows = []
-		past_followers = self.get_past_followers()
+		if len(followers) == 0:
+			Logger().debug('Empty followers list for user %s, skipping' % self.id)
+			return unfollows
+		past_followers = self.get_followers()
 		for past_follower in past_followers:
 			if not past_follower in followers:
 				unfollows.append(past_follower)
 		return unfollows
 
-	def get_past_followers(self):
+	def get_followers(self):
 		"""Read user followers from file and return as list"""
 		followers_list = []
 		try:
-			followers_file = open(self.get_filename())
-			for follower in followers_file:
-				try:
+			with open(self.get_filename('followers')) as followers_file:
+				for follower in followers_file:
 					followers_list.append(int(follower))
-				except:
-					pass
-			followers_file.close()
-		except:
+		except IOError:
 			pass
 		return followers_list
 
-	def update(self, followers):
+	def update_followers(self, followers):
 		"""Write user followers to file"""
-		followers_file = open(self.get_filename(), 'w+')
-		for follower in followers:
-			followers_file.write(str(follower)+'\n')
-		followers_file.close()
+		with open(self.get_filename('followers'), 'w+') as followers_file:
+			for follower in followers:
+				followers_file.write(str(follower)+'\n')
 
 	def append_followers(self, followers):
 		"""Append additional user followers and save full list"""
-		past_followers = self.get_past_followers()
+		past_followers = self.get_followers()
 		Logger().debug('There was %d followers for %s' % (len(past_followers), self.id))
 		past_followers += followers
-		self.update(followers)
+		self.update_followers(followers)
 		Logger().debug('Currently there is %d followers for %s' % (len(past_followers), self.id))
 
 
@@ -300,7 +287,9 @@ class Unfollowr:
 		"""Calculate user unfollows"""
 		user = User(user)
 		user_followers = self.twitter.get_followers(user.id)
-		unfollows = user.calculate(user_followers)
+		unfollows = user.get_unfollows(user_followers)
+		if len(user_followers) > 0:
+			user.update_followers(user_followers)
 		return unfollows
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
