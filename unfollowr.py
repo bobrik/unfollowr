@@ -377,17 +377,21 @@ class Unfollowr:
 	def get_user_followers(self, user_id):
 		"""Return user followers. Tries to use OAuth user info"""
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
-			print "trololo, found it: %s!" % user_id
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
 			if user_twitter_api.verify_credentials() != False:
 				Logger().warning('Using OAuth to get followers for user %s' % user_id)
 				return user_twitter_api.get_followers(user_id)
 			else:
 				self.twitter.send_notification(user_id, 'Warning: your OAuth data was revoked or become incorrect')
-		Logger().warning('OAuth login info is incorrect, revoking it')
+				Logger().warning('OAuth login info is incorrect, revoking it')
 		user_followers = self.twitter.get_followers(user_id)
 		if user_followers == False:
-			self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow OAuth access: http://bobrik.name/unfollowr/')
+			if not os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified')):
+				self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow OAuth access: http://bobrik.name/unfollowr/')
+				file = open(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified'), 'w')
+				file.close()
+			else:
+				Logger().debug('User %s already notified about OAuth access' % user_id)
 		return user_followers
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
