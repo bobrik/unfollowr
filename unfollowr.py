@@ -341,9 +341,14 @@ class Unfollowr:
 		while True:
 			followers = self.twitter.get_followers(self.user)
 			if followers != False:
-				for i, user in enumerate(followers):
+				for i, user_id in enumerate(followers):
 					Logger().info('Calculating for user #%d from %d' % (i+1, len(followers)))
-					user_unfollowers = self.calculate_user(user)
+					user_followers = self.get_user_followers(user_id)
+					if user_followers == False:
+						Logger().warning('Can\'t get followers list for %s, skipping' % user_id)
+						continue
+					user = User(user_id)
+					user_unfollowers = user.get_unfollows(user_followers)
 					named_user_unfollowers = []
 					unnamed_user_unfollowers = []
 					for unfollower in user_unfollowers:
@@ -354,25 +359,14 @@ class Unfollowr:
 							unnamed_user_unfollowers.append(unfollower)
 					if len(unnamed_user_unfollowers) > 0:
 						named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
-					Logger().debug('Unfollows for '+str(user)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
-					self.send_unfollowed_notifications(user, named_user_unfollowers)
+					Logger().debug('Unfollows for '+str(user_id)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
+					self.send_unfollowed_notifications(user_id, named_user_unfollowers)
+					if len(user_followers) > 0:
+						user.update_followers(user_followers)
 			else:
 				Logger.warning('Can\'t get bot followers list')
 			Logger().info('Sleeping befoge next iteration for %d seconds' % self.iterations_sleep)
 			time.sleep(self.iterations_sleep)
-
-	def calculate_user(self, user_id):
-		"""Calculate user unfollows"""
-		user = User(user_id)
-		user_followers = self.get_user_followers(user_id)
-		if user_followers == False:
-			Logger().warning('Can\'t get followers list for %s' % user_id)
-			return []
-		else:
-			unfollows = user.get_unfollows(user_followers)
-			if len(user_followers) > 0:
-				user.update_followers(user_followers)
-			return unfollows
 
 	def get_user_followers(self, user_id):
 		"""Return user followers. Tries to use OAuth user info"""
