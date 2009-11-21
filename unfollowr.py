@@ -1,4 +1,4 @@
-#!/usr/bin/python2.6
+#!/usr/bin/env python2.6
 # -*- coding: utf-8 -*-
 
 # unfollowr bot to calculate unfollows and dm users about them
@@ -109,7 +109,7 @@ class Twitter:
 		"""Get user screen_name by id"""
 		url = 'https://twitter.com/users/show/%d.json' % int(user_id)
 		data = self.get_api_data(url)
-		if data.has_key('screen_name'):
+		if data != False  and data.has_key('screen_name'):
 			return data['screen_name']
 		else:
 			Logger().debug('No username for user %d' % int(user_id))
