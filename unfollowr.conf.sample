@@ -3,5 +3,9 @@
 username=
 password=
 
+[oauth]
+consumer=
+consumer_secret=
+
 [logger]
 loglevel=debug

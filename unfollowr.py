@@ -22,12 +22,17 @@
 
 # WARNING: python-2.6 required because of json module
 
+# TODO: settinngs in django style (settings.py?)
+# TODO: stats!!11
+# TODO: check is user blocked another user
+
 import os
 import urllib
 import json
 import time
 import copy
 import ConfigParser
+from oauth import oauth
 
 
 class Logger(object):
@@ -82,22 +87,104 @@ class Logger(object):
 
 class Twitter:
 	"""Twitter API communication class."""
-	user     = None
-	password = None
-	api_opener = None
 	check_rate_limit = False
 	min_available_api_requests = 10
 	rate_checking_sleep = 120
 	request_sleep = 1
+
+	def __init__(self):
+		Logger().warning('You must not use Twitter class directly, use descedants')
+		exit()
+
+	def send_notification(self, user_id, message):
+		"""Send direct message to user_id. Must be implemented in descendant"""
+		pass
+
+	def get_followers(self, user):
+		"""Get user followers list with ids"""
+		url = 'https://twitter.com/followers/ids/%s.json' % user
+		return self.get_api_data(url)
+
+	def get_screen_name(self, user_id):
+		"""Get user screen_name by id"""
+		url = 'https://twitter.com/users/show/%d.json' % int(user_id)
+		data = self.get_api_data(url)
+		if data.has_key('screen_name'):
+			return data['screen_name']
+		else:
+			Logger().debug('No username for user %d' % int(user_id))
+			return False
+
+	def check_hourly_limit(self):
+		"""Check is hourly request limit reached and waits for new requests"""
+		url = 'https://twitter.com/account/rate_limit_status.json'
+		while True:
+			data = self.get_api_data(url, True)
+			if data == False:
+				Logger().debug('Got nothing while checking rate limit, assuming status is ok')
+				return
+			elif data['remaining_hits'] > self.min_available_api_requests:
+				Logger().debug('Twitter api rate limit checking ok, %d requests remaining' % data['remaining_hits'])
+				return
+			else:
+				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['remaining_hits'], self.rate_checking_sleep))
+				time.sleep(self.rate_checking_sleep)
+
+	def get_api_data(self, url, unlimited=False):
+		"""Internal method to get decoded JSON data from API"""
+		path = url[url.find('/', 10):]
+		while True:
+			try:
+				time.sleep(self.request_sleep)
+				if self.check_rate_limit and not unlimited:
+					self.check_hourly_limit()
+				jsondata = self._get_api_data(url)
+				data = json.loads(jsondata)
+				Logger().debug('Got %d bytes of correct json data from twitter api url: %s' % (len(jsondata), path))
+				return data
+			except KeyboardInterrupt:
+				Logger().warning('Got keyboard interrupt, exiting')
+				exit()
+			except ValueError:
+				Logger().warning('Wrong JSON data from twitter. Trying again')
+			except IOError, error_code:
+				if error_code[0] == "http error":
+					if error_code[1] == 404:
+						Logger().debug('Got HTTP error 404 for %s' % path)
+						return False
+					elif error_code[1] == 401:
+						Logger().debug('Received 401 for request %s' % path)
+						return False
+			except:
+				Logger().warning('Something went wrong while getting twitter api answer')
+
+
+class BasicAuthTwitterAPI(Twitter):
 
 	def __init__(self, user, password):
 		self.user = user
 		self.password = password
 		self.api_opener = urllib.URLopener()
 
+	def __get_url(self, url):
+		return url[:url.find('://')+3]+self.user+':'+self.password+'@'+url[url.find('://')+3:]
+
+	def _get_api_data(self, url):
+		connection = self.api_opener.open(self.__get_url(url))
+		answer = connection.read()
+		connection.close()
+		return answer
+
+	def verify_credentials(self):
+		"""Verify is user credentails correct"""
+		url = 'https://twitter.com/account/verify_credentials.json'
+		if self.get_api_data(url) == False:
+			return False
+		else:
+			return True
+
 	def send_notification(self, user_id, message):
-		"""Send direct message to user_id"""
-		url = 'http://%s:%s@twitter.com/direct_messages/new.json' % (self.user, self.password)
+		url = self.__get_url('https://twitter.com/direct_messages/new.json')
 		data = {'user_id': user_id, 'text': message}
 		while True:
 			try:
@@ -111,72 +198,55 @@ class Twitter:
 			except:
 				Logger().warning('Oops, something wrong with twitter communication. Trying again')
 
+
+class OAuthTwitterAPI(Twitter):
+
+	check_rate_limit = True
+
+	def __init__(self, user, oauth_token, oauth_token_secret, consumer):
+		self.__init_common(user, oauth_token, oauth_token_secret, consumer)
+
+	def __init__(self, user, consumer):
+		try:
+			authfile = open('oauth/'+str(user)+'.oauth')
+			oauth_token = authfile.readline().strip()
+			oauth_token_secret = authfile.readline().strip()
+			authfile.close()
+		except:
+			oauth_token = ''
+			oauth_token_secret = ''
+			Logger().warning('Can\'t get oauth info from file for user %s' % user)
+		self.__init_common(user, oauth_token, oauth_token_secret, consumer)
+
+	def __init_common(self, user, oauth_token, oauth_token_secret, consumer):
+		self.user = user
+		self.token = oauth.OAuthToken(oauth_token, oauth_token_secret)
+		self.consumer = consumer
+		self.signature_method = oauth.OAuthSignatureMethod_HMAC_SHA1()
+		self.api_opener = urllib.URLopener()
+
+	def _get_api_data(self, url):
+		request = oauth.OAuthRequest.from_consumer_and_token(
+			self.consumer, token=self.token, http_url=url,
+			parameters=None, http_method='GET'
+		)
+		request.sign_request(self.signature_method, self.consumer, self.token)
+		connection = self.api_opener.open(request.to_url())
+		answer = connection.read()
+		connection.close()
+		return answer
+
 	def verify_credentials(self):
-		"""Verify is user credentails correct"""
-		url = 'http://%s:%s@twitter.com/account/verify_credentials.json' % (self.user, self.password)
-		if self.get_api_data(url) == {}:
+		url = 'https://twitter.com/account/verify_credentials.json'
+		data = self.get_api_data(url)
+		if data == False:
 			return False
 		else:
 			return True
 
-	def get_followers(self, user):
-		"""Get user followers list with ids"""
-		url = 'http://%s:%s@twitter.com/followers/ids/%s.json' % (self.user, self.password, user)
-		return self.get_api_data(url)
-
-	def get_screen_name(self, user_id):
-		"""Get user screen_name by id"""
-		url = 'http://%s:%s@twitter.com/users/show/%d.json' % (self.user, self.password, int(user_id))
-		data = self.get_api_data(url)
-		if data.has_key('screen_name'):
-			return data['screen_name']
-		else:
-			Logger().debug('No username for user %d' % int(user_id))
-			return ''
-
-	def check_hourly_limit(self):
-		"""Check is hourly request limit reached and waits for new requests"""
-		url = 'http://%s:%s@twitter.com/account/rate_limit_status.json' % (self.user, self.password)
-		while True:
-			data = self.get_api_data(url, True)
-			if data['remaining_hits'] > self.min_available_api_requests:
-				Logger().debug('Twitter api rate limit checking ok, %d requests remaining' % data['remaining_hits'])
-				return
-			else:
-				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['remaining_hits'], self.rate_checking_sleep))
-				time.sleep(self.rate_checking_sleep)
-
-	def get_api_data(self, url, unlimited=False):
-		"""Internal method to get decoded JSON data from API"""
-		path = url[url.find('/', 10):]
-		while True:
-			try:
-				if self.check_rate_limit and not unlimited:
-					self.check_hourly_limit()
-					time.sleep(self.request_sleep)
-				connection = self.api_opener.open(url)
-				jsondata = connection.read()
-				connection.close()
-				data = json.loads(jsondata)
-				Logger().debug('Got %d bytes of correct json data from twitter api url: %s' % (len(jsondata), path))
-				return data
-			except KeyboardInterrupt:
-				Logger().warning('Got keyboard interrupt, exiting')
-				exit()
-			except ValueError:
-				Logger().warning('Wrong JSON data from twitter. Trying again')
-			except IOError, error_code:
-				if error_code[0] == "http error":
-					if error_code[1] == 404:
-						Logger().debug('Got HTTP error 404 for %s' % path)
-						return {}
-					elif error_code[1] == 401:
-						#Logger().debug('Twitter needs to get authorisation again. Having another try after %d seconds' % self.error_sleep)
-						#time.sleep(self.error_sleep)
-						Logger().debug('Twitter bug, we can\'t see followers list for user with protected updates')
-						return {}
-			except:
-				Logger().warning('Something went wrong while getting twitter api answer')
+	def send_notification(self, user_id, message):
+		Logger().warning('Sending DM not implemented with OAuth')
+		exit()
 
 
 class User:
@@ -187,8 +257,9 @@ class User:
 	def get_id(self):
 		return self.id
 
-	def get_filename(self, prefix):
-		return prefix+'/'+str(self.id)+'.list'
+	def get_filename(self, prefix, postfix='list'):
+		"""Return user filename for some data in prefix dir with postfix extension"""
+		return prefix+'/'+str(self.id)+'.'+postfix
 
 	def get_unfollows(self, followers):
 		"""Return user unfollows"""
@@ -252,45 +323,72 @@ class Unfollowr:
 		# configuring credentails
 		self.user = config.get('unfollowr', 'username')
 		self.password = config.get('unfollowr', 'password')
-		self.twitter = Twitter(self.user, self.password)
+		self.twitter = BasicAuthTwitterAPI(self.user, self.password)
+		self.oauth_consumer = oauth.OAuthConsumer(config.get('oauth', 'consumer'), config.get('oauth', 'consumer_secret'))
 		if not self.twitter.verify_credentials():
 			Logger().warning('Twitter auth info incorrect. Check your config file!')
 			exit()
-		# datadir creation
-		if not os.path.exists(os.path.join(os.path.dirname(__file__), 'followers')):
-			os.mkdir(os.path.join(os.path.dirname(__file__), 'followers'))
+		self.__create_datadirs(['followers', 'oauth', 'stats'])
+
+	def __create_datadirs(self, dirs):
+		"""Internal method to create datadirs if they not exists"""
+		for directory in dirs:
+			if not os.path.exists(os.path.join(os.path.dirname(__file__), directory)):
+				os.mkdir(os.path.join(os.path.dirname(__file__), directory))
 
 	def start(self):
 		"""Main application loop"""
 		while True:
 			followers = self.twitter.get_followers(self.user)
-			for i, user in enumerate(followers):
-				Logger().info('Calculating for user #%d from %d' % (i+1, len(followers)))
-				user_unfollowers = self.calculate_user(user)
-				named_user_unfollowers = []
-				unnamed_user_unfollowers = []
-				for unfollower in user_unfollowers:
-					name = self.twitter.get_screen_name(unfollower)
-					if name != '':
-						named_user_unfollowers.append(name)
-					else:
-						# FIXME: do we need to store them? mostly spammers
-						unnamed_user_unfollowers.append(unfollower)
-				if len(unnamed_user_unfollowers) > 0:
-					named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
-				Logger().debug('Unfollows for '+str(user)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
-				self.send_unfollowed_notifications(user, named_user_unfollowers)
+			if followers != False:
+				for i, user in enumerate(followers):
+					Logger().info('Calculating for user #%d from %d' % (i+1, len(followers)))
+					user_unfollowers = self.calculate_user(user)
+					named_user_unfollowers = []
+					unnamed_user_unfollowers = []
+					for unfollower in user_unfollowers:
+						name = self.twitter.get_screen_name(unfollower)
+						if name != False:
+							named_user_unfollowers.append(name)
+						else:
+							unnamed_user_unfollowers.append(unfollower)
+					if len(unnamed_user_unfollowers) > 0:
+						named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
+					Logger().debug('Unfollows for '+str(user)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
+					self.send_unfollowed_notifications(user, named_user_unfollowers)
+			else:
+				Logger.warning('Can\'t get bot followers list')
 			Logger().info('Sleeping befoge next iteration for %d seconds' % self.iterations_sleep)
 			time.sleep(self.iterations_sleep)
 
-	def calculate_user(self, user):
+	def calculate_user(self, user_id):
 		"""Calculate user unfollows"""
-		user = User(user)
-		user_followers = self.twitter.get_followers(user.id)
-		unfollows = user.get_unfollows(user_followers)
-		if len(user_followers) > 0:
-			user.update_followers(user_followers)
-		return unfollows
+		user = User(user_id)
+		user_followers = self.get_user_followers(user_id)
+		if user_followers == False:
+			Logger().warning('Can\'t get followers list for %s' % user_id)
+			return []
+		else:
+			unfollows = user.get_unfollows(user_followers)
+			if len(user_followers) > 0:
+				user.update_followers(user_followers)
+			return unfollows
+
+	def get_user_followers(self, user_id):
+		"""Return user followers. Tries to use OAuth user info"""
+		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
+			print "trololo, found it: %s!" % user_id
+			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
+			if user_twitter_api.verify_credentials() != False:
+				Logger().warning('Using OAuth to get followers for user %s' % user_id)
+				return user_twitter_api.get_followers(user_id)
+			else:
+				self.twitter.send_notification(user_id, 'Warning: your OAuth data was revoked or become incorrect')
+		Logger().warning('OAuth login info is incorrect, revoking it')
+		user_followers = self.twitter.get_followers(user_id)
+		if user_followers == False:
+			self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow OAuth access: http://bobrik.name/unfollowr/')
+		return user_followers
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
 		"""Send message to user about unfollows"""
