@@ -195,6 +195,12 @@ class BasicAuthTwitterAPI(Twitter):
 			except KeyboardInterrupt:
 				Logger().warning('Got keyboard interrupt, exiting')
 				exit()
+			except IOError, error_code:
+				if error_code[0] == "http error":
+					if error_code[1] == 403:
+						Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
+						break
+				raise
 			except:
 				Logger().warning('Oops, something wrong with twitter communication. Trying again')
 
