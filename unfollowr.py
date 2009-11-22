@@ -200,7 +200,7 @@ class BasicAuthTwitterAPI(Twitter):
 					if error_code[1] == 403:
 						Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
 						break
-				raise
+					Logger().warning('Get HTTP error %s error from twitter, trying again' % error_code[1])
 			except:
 				Logger().warning('Oops, something wrong with twitter communication. Trying again')
 
