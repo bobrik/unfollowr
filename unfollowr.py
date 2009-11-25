@@ -25,6 +25,7 @@
 # TODO: settinngs in django style (settings.py?)
 # TODO: stats!!11
 # TODO: check is user blocked another user
+# TODO: make Logger class threadsafe to use in listwatcher with different fname
 
 import os
 import urllib
@@ -90,7 +91,7 @@ class Twitter:
 	check_rate_limit = False
 	min_available_api_requests = 10
 	rate_checking_sleep = 120
-	request_sleep = 1
+	request_sleep = 0
 
 	def __init__(self):
 		Logger().warning('You must not use Twitter class directly, use descedants')
@@ -135,7 +136,9 @@ class Twitter:
 		path = url[url.find('/', 10):]
 		while True:
 			try:
-				time.sleep(self.request_sleep)
+				if self.request_sleep > 0:
+					Logger().debug('Sleeping for %d seconds before request' % self.request_sleep)
+					time.sleep(self.request_sleep)
 				if self.check_rate_limit and not unlimited:
 					self.check_hourly_limit()
 				jsondata = self._get_api_data(url)
