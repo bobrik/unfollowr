@@ -22,9 +22,14 @@
 
 # WARNING: python-2.6 required because of json module
 
+# THIS IS A FUCKING FORK. IT'S GOAL IS TO CORRECT SOME STUPID GRAMMAR MISTAKES
+# AND MAKE ANOTHER ONES
+# Copyright (c) 2010 Va1en0k
+# Allheil   (h) 	 Megatron
+
 # TODO: settinngs in django style (settings.py?)
 # TODO: stats!!11
-# TODO: check is user blocked another user
+# TODO: check if user blocked another user
 # TODO: make Logger class threadsafe to use in listwatcher with different fname
 
 import os
@@ -37,7 +42,7 @@ from oauth import oauth
 
 
 class Logger(object):
-	"""Class to log events and write stats to file and console. Singletone"""
+	"""Logs events and writes stats to the logfile and console. Singleton"""
 
 	instance      = None
 	logfile       = 'unfollowr.log'
@@ -73,7 +78,7 @@ class Logger(object):
 
 	def debug(self, message):
 		if self.show_debug:
-			self.write('[Debug] '+str(message))
+			self.write('[Debg] '+str(message))
 
 	def timestamp(self):
 		return time.strftime('%Y-%m-%d %H:%M:%S')
@@ -94,7 +99,7 @@ class Twitter:
 	request_sleep = 0
 
 	def __init__(self):
-		Logger().warning('You must not use Twitter class directly, use descedants')
+		Logger().warning('You must not use Twitter class directly, use its descedants')
 		exit()
 
 	def send_notification(self, user_id, message):
@@ -102,12 +107,12 @@ class Twitter:
 		pass
 
 	def get_followers(self, user):
-		"""Get user followers list with ids"""
+		"""User followers"""
 		url = 'https://twitter.com/followers/ids/%s.json' % user
 		return self.get_api_data(url)
 
 	def get_screen_name(self, user_id):
-		"""Get user screen_name by id"""
+		"""User screen_name by id"""
 		url = 'https://twitter.com/users/show/%d.json' % int(user_id)
 		data = self.get_api_data(url)
 		if data != False  and data.has_key('screen_name'):
@@ -117,7 +122,7 @@ class Twitter:
 			return False
 
 	def check_hourly_limit(self):
-		"""Check is hourly request limit reached and waits for new requests"""
+		"""Checks if hourly request limit reached. In this case, falls asleep suddenly"""
 		url = 'https://twitter.com/account/rate_limit_status.json'
 		while True:
 			data = self.get_api_data(url, True)
@@ -125,14 +130,14 @@ class Twitter:
 				Logger().debug('Got nothing while checking rate limit, assuming status is ok')
 				return
 			elif data['remaining_hits'] > self.min_available_api_requests:
-				Logger().debug('Twitter api rate limit checking ok, %d requests remaining' % data['remaining_hits'])
+				Logger().debug('Twitter api rate limit checked: %d requests remaining' % data['remaining_hits'])
 				return
 			else:
 				Logger().warning('Hourly twitter api rate limit reached (%d requests remaining). Sleeping for %d seconds' % (data['remaining_hits'], self.rate_checking_sleep))
 				time.sleep(self.rate_checking_sleep)
 
 	def get_api_data(self, url, unlimited=False):
-		"""Internal method to get decoded JSON data from API"""
+		"""Internal method, returns decoded JSON data from API"""
 		path = url[url.find('/', 10):]
 		while True:
 			try:
@@ -179,7 +184,7 @@ class BasicAuthTwitterAPI(Twitter):
 		return answer
 
 	def verify_credentials(self):
-		"""Verify is user credentails correct"""
+		"""Verify if user credentials correct"""
 		url = 'https://twitter.com/account/verify_credentials.json'
 		if self.get_api_data(url) == False:
 			return False
@@ -203,9 +208,9 @@ class BasicAuthTwitterAPI(Twitter):
 					if error_code[1] == 403:
 						Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
 						break
-					Logger().warning('Get HTTP error %s error from twitter, trying again' % error_code[1])
+					Logger().warning('Got HTTP error %s error from twitter, trying again' % error_code[1])
 			except:
-				Logger().warning('Oops, something wrong with twitter communication. Trying again')
+				Logger().warning('Oops, something wrong with twitter. Trying again')
 
 
 class OAuthTwitterAPI(Twitter):
@@ -254,27 +259,27 @@ class OAuthTwitterAPI(Twitter):
 			return True
 
 	def send_notification(self, user_id, message):
-		Logger().warning('Sending DM not implemented with OAuth')
+		Logger().warning('Sending DM is not implemented in OAuthTwitterAPI class')
 		exit()
 
 
 class User:
-	"""Twittter user class to work with followers"""
+	"""Represents happy twitter users"""
 	def __init__(self, id):
 		self.id = id
 
 	def get_id(self):
 		return self.id
 
-	def get_filename(self, prefix, postfix='list'):
-		"""Return user filename for some data in prefix dir with postfix extension"""
-		return prefix+'/'+str(self.id)+'.'+postfix
+	def get_filename(self, dirname, extension='list'):
+		"""Returns name of user's own file in directory"""
+		return dirname+'/'+str(self.id)+'.'+extension
 
 	def get_unfollows(self, followers):
-		"""Return user unfollows"""
+		"""Returns bastards who unfollowed this guy"""
 		unfollows = []
 		if len(followers) == 0:
-			Logger().debug('Empty followers list for user %s, skipping' % self.id)
+			Logger().debug('User %s has no followers, ha ha ha ha (skipping)' % self.id)
 			return unfollows
 		past_followers = self.get_followers()
 		for past_follower in past_followers:
@@ -283,7 +288,7 @@ class User:
 		return unfollows
 
 	def get_followers(self):
-		"""Read user followers from file and return as list"""
+		"""Reads user followers from file and returns them as list"""
 		followers_list = []
 		try:
 			with open(self.get_filename('followers')) as followers_file:
@@ -294,7 +299,7 @@ class User:
 		return followers_list
 
 	def update_followers(self, followers):
-		"""Write user followers to file"""
+		"""Saves user followers to file"""
 		with open(self.get_filename('followers'), 'w+') as followers_file:
 			for follower in followers:
 				followers_file.write(str(follower)+'\n')
@@ -302,14 +307,14 @@ class User:
 	def append_followers(self, followers):
 		"""Append additional user followers and save full list"""
 		past_followers = self.get_followers()
-		Logger().debug('There was %d followers for %s' % (len(past_followers), self.id))
+		Logger().debug('Once upon a time, %s had %d followers' % (len(past_followers), self.id))
 		past_followers += followers
 		self.update_followers(followers)
-		Logger().debug('Currently there is %d followers for %s' % (len(past_followers), self.id))
+		Logger().debug('Currently %s has %d followers' % (len(past_followers), self.id))
 
 
 class Unfollowr:
-	"""Unfollowr application class"""
+	"""Unfollowr main application class"""
 	iterations_sleep = 2400
 	twitter = None
 
@@ -340,7 +345,7 @@ class Unfollowr:
 		self.__create_datadirs(['followers', 'oauth', 'stats'])
 
 	def __create_datadirs(self, dirs):
-		"""Internal method to create datadirs if they not exists"""
+		"""Internal method to create datadirs if they still not exist"""
 		for directory in dirs:
 			if not os.path.exists(os.path.join(os.path.dirname(__file__), directory)):
 				os.mkdir(os.path.join(os.path.dirname(__file__), directory))
@@ -351,10 +356,10 @@ class Unfollowr:
 			followers = self.twitter.get_followers(self.user)
 			if followers != False:
 				for i, user_id in enumerate(followers):
-					Logger().info('Calculating for user #%d from %d' % (i+1, len(followers)))
+					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
 					user_followers = self.get_user_followers(user_id)
 					if user_followers == False:
-						Logger().warning('Can\'t get followers list for %s, skipping' % user_id)
+						Logger().warning('Couldn\'t get list of %s\'s for %s, skipping' % user_id)
 						continue
 					user = User(user_id)
 					user_unfollowers = user.get_unfollows(user_followers)
@@ -368,21 +373,21 @@ class Unfollowr:
 							unnamed_user_unfollowers.append(unfollower)
 					if len(unnamed_user_unfollowers) > 0:
 						named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
-					Logger().debug('Unfollows for '+str(user_id)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
+					Logger().debug('Unfollowed '+str(user_id)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
 					self.send_unfollowed_notifications(user_id, named_user_unfollowers)
 					if len(user_followers) > 0:
 						user.update_followers(user_followers)
 			else:
-				Logger.warning('Can\'t get bot followers list')
-			Logger().info('Sleeping befoge next iteration for %d seconds' % self.iterations_sleep)
+				Logger.warning('Could not get list of my followers!')
+			Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
 			time.sleep(self.iterations_sleep)
 
 	def get_user_followers(self, user_id):
-		"""Return user followers. Tries to use OAuth user info"""
+		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
 			if user_twitter_api.verify_credentials() != False:
-				Logger().warning('Using OAuth to get followers for user %s' % user_id)
+				Logger().warning('Using OAuth to get followers of %s' % user_id)
 				return user_twitter_api.get_followers(user_id)
 			else:
 				self.twitter.send_notification(user_id, 'Warning: your OAuth data was revoked or become incorrect')
@@ -390,21 +395,21 @@ class Unfollowr:
 		user_followers = self.twitter.get_followers(user_id)
 		if user_followers == False:
 			if not os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified')):
-				self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow OAuth access: http://bobrik.name/unfollowr/')
+				self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow me OAuth access: http://bobrik.name/unfollowr/')
 				file = open(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified'), 'w')
 				file.close()
 			else:
-				Logger().debug('User %s already notified about OAuth access' % user_id)
+				Logger().debug('User %s has already been notified about OAuth access' % user_id)
 		return user_followers
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
 		"""Send message to user about unfollows"""
-		message = 'Tweeps that no longer following you: '
+		message = 'These guys no longer find you interesting or were deceased: '
 		for pack in self.split_to_packs(user_unfollowers):
 			self.twitter.send_notification(user, message+pack)
 
 	def split_to_packs(self, data, max_pack_length=90):
-		"""Split usernames to pack to make direct messages shorter than 140 chars"""
+		"""Split usernames to packs shorter than maximum pack length"""
 		data = copy.copy(data) # we don't want to affect on data
 		packs = []
 		while len(data) > 0:
