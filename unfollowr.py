@@ -312,7 +312,7 @@ class User:
 
 class Unfollowr:
 	"""Unfollowr main application class"""
-	iterations_sleep = 2400
+	iterations_sleep = 0
 	twitter = None
 
 	def __init__(self):
@@ -376,8 +376,9 @@ class Unfollowr:
 						user.update_followers(user_followers)
 			else:
 				Logger.warning('Could not get list of my followers!')
-			Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
-			time.sleep(self.iterations_sleep)
+			if self.iterations_sleep > 0:
+				Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
+				time.sleep(self.iterations_sleep)
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
