@@ -234,8 +234,8 @@ class BasicAuthTwitterAPI(Twitter):
 		data = {'user_id': user_id, 'text': message}
 		while True:
 			try:
-				#connection = self.api_opener.open(url, urllib.urlencode(data))
-				#connection.close()
+				connection = self.api_opener.open(url, urllib.urlencode(data))
+				connection.close()
 				Logger().info('Send message to %s: %s' % (data['user_id'], data['text']))
 				break
 			except KeyboardInterrupt:
