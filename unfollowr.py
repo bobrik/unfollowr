@@ -22,10 +22,7 @@
 
 # WARNING: python-2.6 required because of json module
 
-# THIS IS A FUCKING FORK. IT'S GOAL IS TO CORRECT SOME STUPID GRAMMAR MISTAKES
-# AND MAKE ANOTHER ONES
-# Copyright (c) 2010 Va1en0k
-# Allheil   (h) 	 Megatron
+# Grammar nazi — Va1en0k (c) 2010
 
 # TODO: settinngs in django style (settings.py?)
 # TODO: stats!!11
@@ -78,7 +75,7 @@ class Logger(object):
 
 	def debug(self, message):
 		if self.show_debug:
-			self.write('[Debg] '+str(message))
+			self.write('[Debug] '+str(message))
 
 	def timestamp(self):
 		return time.strftime('%Y-%m-%d %H:%M:%S')
@@ -276,10 +273,10 @@ class User:
 		return dirname+'/'+str(self.id)+'.'+extension
 
 	def get_unfollows(self, followers):
-		"""Returns bastards who unfollowed this guy"""
+		"""Returns user unfollowers list"""
 		unfollows = []
 		if len(followers) == 0:
-			Logger().debug('User %s has no followers, ha ha ha ha (skipping)' % self.id)
+			Logger().debug('User %s has no followers,skipping' % self.id)
 			return unfollows
 		past_followers = self.get_followers()
 		for past_follower in past_followers:
@@ -404,7 +401,7 @@ class Unfollowr:
 
 	def send_unfollowed_notifications(self, user, user_unfollowers):
 		"""Send message to user about unfollows"""
-		message = 'These guys no longer find you interesting or were deceased: '
+		message = 'Tweeps that no longer following you: '
 		for pack in self.split_to_packs(user_unfollowers):
 			self.twitter.send_notification(user, message+pack)
 
