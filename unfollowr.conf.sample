@@ -9,3 +9,9 @@ consumer_secret=
 
 [logger]
 loglevel=debug
+
+[mysql]
+host=
+user=
+passwd=
+database=

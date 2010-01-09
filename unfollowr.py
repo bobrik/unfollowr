@@ -36,6 +36,7 @@ import time
 import copy
 import ConfigParser
 from oauth import oauth
+import MySQLdb
 
 
 class Logger(object):
@@ -87,6 +88,31 @@ class Logger(object):
 		with open(self.logfile, 'a') as log:
 			log.write(event_line+'\n')
 
+class DBStore:
+	"""Class to store unfollows information to database"""
+	def __init__(self, host, user, passwd, db):
+		try:
+			conn = MySQLdb.connect( host   = host,
+									user   = user,
+									passwd = passwd,
+									db     = db)
+		except MySQLdb.Error, e:
+			Logger().warning('Couldn\'t connect to MySQL database. %d: %s' % (e.args[0], e.args[1]))
+			exit(1)
+		self.cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+	def save_unfollows(self, user_id, unfollowers):
+		for unfollower_id in unfollowers.keys():
+			self.cursor.execute("INSERT INTO unfollowr_unfollows "+
+				"(`user_id`, `unfollower_id`, `unfollower_name`, `date`) "+
+				" VALUES ('%d', '%d', '%s', NOW())" % (user_id, unfollower_id, unfollowers[unfollower_id]))
+
+	def start_timer(self):
+		self.cursor.execute('INSERT INTO unfollowr_iterations (start_time, stop_time) values (now(), now())')
+		return self.cursor.lastrowid
+
+	def stop_timer(self, timer):
+		self.cursor.execute('UPDATE unfollowr_iterations SET stop_time = "'+time.strftime('%Y-%m-%d %H:%M:%S')+'" WHERE id = %d' % timer)
+
 
 class Twitter:
 	"""Twitter API communication class."""
@@ -99,11 +125,34 @@ class Twitter:
 		Logger().warning('You must not use Twitter class directly, use its descedants')
 		exit()
 
+	def verify_credentials(self):
+		"""Verify if user credentials correct"""
+		url = 'https://twitter.com/account/verify_credentials.json'
+		if self.get_api_data(url) == False:
+			return False
+		else:
+			return True
+
 	def send_notification(self, user_id, message):
 		"""Send direct message to user_id. Must be implemented in descendant"""
 		pass
 
 	def get_followers(self, user):
+		"""User followers"""
+		url = 'https://twitter.com/followers/ids/%s.json' % user
+		followers = []
+		next_cursor = -1
+		while next_cursor != 0:
+			page_url = url+'?cursor=%d' % next_cursor
+			data = self.get_api_data(page_url)
+			if data == False or not data.has_key('next_cursor') or not data.has_key('ids'):
+				return False
+			else:
+				next_cursor = data['next_cursor']
+				followers += data['ids']
+		return followers
+
+	def get_followers_old(self, user):
 		"""User followers"""
 		url = 'https://twitter.com/followers/ids/%s.json' % user
 		return self.get_api_data(url)
@@ -180,21 +229,13 @@ class BasicAuthTwitterAPI(Twitter):
 		connection.close()
 		return answer
 
-	def verify_credentials(self):
-		"""Verify if user credentials correct"""
-		url = 'https://twitter.com/account/verify_credentials.json'
-		if self.get_api_data(url) == False:
-			return False
-		else:
-			return True
-
 	def send_notification(self, user_id, message):
 		url = self.__get_url('https://twitter.com/direct_messages/new.json')
 		data = {'user_id': user_id, 'text': message}
 		while True:
 			try:
-				connection = self.api_opener.open(url, urllib.urlencode(data))
-				connection.close()
+				#connection = self.api_opener.open(url, urllib.urlencode(data))
+				#connection.close()
 				Logger().info('Send message to %s: %s' % (data['user_id'], data['text']))
 				break
 			except KeyboardInterrupt:
@@ -237,23 +278,21 @@ class OAuthTwitterAPI(Twitter):
 		self.api_opener = urllib.URLopener()
 
 	def _get_api_data(self, url):
+		if url.find('?') != -1:
+			get_parameters = {}
+			for pair in url[url.find('?')+1:].split('&'):
+				key, value = pair.split('=')
+				get_parameters[key] = value
+		else:
+			get_parameters = None
 		request = oauth.OAuthRequest.from_consumer_and_token(
 			self.consumer, token=self.token, http_url=url,
-			parameters=None, http_method='GET'
-		)
+			parameters=get_parameters, http_method='GET')
 		request.sign_request(self.signature_method, self.consumer, self.token)
 		connection = self.api_opener.open(request.to_url())
 		answer = connection.read()
 		connection.close()
 		return answer
-
-	def verify_credentials(self):
-		url = 'https://twitter.com/account/verify_credentials.json'
-		data = self.get_api_data(url)
-		if data == False:
-			return False
-		else:
-			return True
 
 	def send_notification(self, user_id, message):
 		Logger().warning('Sending DM is not implemented in OAuthTwitterAPI class')
@@ -312,7 +351,7 @@ class User:
 
 class Unfollowr:
 	"""Unfollowr main application class"""
-	iterations_sleep = 0
+	iterations_sleep = 300
 	twitter = None
 
 	def __init__(self):
@@ -339,6 +378,11 @@ class Unfollowr:
 		if not self.twitter.verify_credentials():
 			Logger().warning('Twitter auth info incorrect. Check your config file!')
 			exit()
+		self.dbstore = DBStore(
+				config.get('mysql', 'host'),
+				config.get('mysql', 'user'),
+				config.get('mysql', 'passwd'),
+				config.get('mysql', 'database'))
 		self.__create_datadirs(['followers', 'oauth', 'stats'])
 
 	def __create_datadirs(self, dirs):
@@ -350,32 +394,35 @@ class Unfollowr:
 	def start(self):
 		"""Main application loop"""
 		while True:
+			timer = self.dbstore.start_timer()
 			followers = self.twitter.get_followers(self.user)
 			if followers != False:
 				for i, user_id in enumerate(followers):
 					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
 					user_followers = self.get_user_followers(user_id)
 					if user_followers == False:
-						Logger().warning('Couldn\'t get list of %s\'s for %s, skipping' % user_id)
+						Logger().warning('Couldn\'t get list of follwers for %s, skipping' % user_id)
 						continue
 					user = User(user_id)
 					user_unfollowers = user.get_unfollows(user_followers)
-					named_user_unfollowers = []
-					unnamed_user_unfollowers = []
-					for unfollower in user_unfollowers:
-						name = self.twitter.get_screen_name(unfollower)
-						if name != False:
-							named_user_unfollowers.append(name)
-						else:
-							unnamed_user_unfollowers.append(unfollower)
-					if len(unnamed_user_unfollowers) > 0:
-						named_user_unfollowers.append('suspended (count: {0:d})'.format(len(unnamed_user_unfollowers)))
-					Logger().debug('Unfollowed '+str(user_id)+':'+str(named_user_unfollowers)+', unnamed: '+str(unnamed_user_unfollowers))
-					self.send_unfollowed_notifications(user_id, named_user_unfollowers)
-					if len(user_followers) > 0:
-						user.update_followers(user_followers)
+					named_user_unfollowers = {}
+					unfollowers_names = []
+					for unfollower_id in user_unfollowers:
+						unfollower_name = self.twitter.get_screen_name(unfollower_id)
+						if unfollower_name == False:
+							unfollower_name = 'suspended'
+						named_user_unfollowers[unfollower_id] = unfollower_name
+					Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
+					self.dbstore.save_unfollows(user_id, named_user_unfollowers)
+					user.update_followers(user_followers)
+					notification_list = [x for x in named_user_unfollowers.values() if x != 'suspended']
+					suspended_unfolllowers_count = len([x for x in named_user_unfollowers.values() if x == 'suspended'])
+					if suspended_unfolllowers_count > 0:
+						notification_list.append('suspended (count: %d)' % suspended_unfolllowers_count)
+					self.send_unfollowed_notifications(user_id, notification_list)
 			else:
 				Logger.warning('Could not get list of my followers!')
+			self.dbstore.stop_timer(timer)
 			if self.iterations_sleep > 0:
 				Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
 				time.sleep(self.iterations_sleep)
