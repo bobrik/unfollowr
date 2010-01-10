@@ -31,6 +31,8 @@
 
 import os
 import urllib
+import urllib2
+import base64
 import json
 import time
 import copy
@@ -120,6 +122,7 @@ class Twitter:
 	min_available_api_requests = 10
 	rate_checking_sleep = 120
 	request_sleep = 0
+	errors_sleep = 120
 
 	def __init__(self):
 		Logger().warning('You must not use Twitter class directly, use its descedants')
@@ -210,16 +213,26 @@ class Twitter:
 				exit()
 			except ValueError:
 				Logger().warning('Wrong JSON data from twitter. Trying again')
-			except IOError, error_code:
-				if error_code[0] == "http error":
-					if error_code[1] == 404:
-						Logger().debug('Got HTTP error 404 for %s' % path)
-						return False
-					elif error_code[1] == 401:
-						Logger().debug('Received 401 for request %s' % path)
-						return False
+			except urllib2.HTTPError, e:
+				try:
+					answer = json.loads(e.read())
+				except:
+					continue
+				if e.code == 401:
+					Logger().debug('Received 401 for request %s' % path)
+					return False
+				elif e.code == 404:
+					Logger().debug('Got HTTP error 404 for %s' % path)
+					return False
+				elif answer.has_key('error') and answer.has_key('request'):
+					Logger().warning('Couldn\'t get API data, twitter returned error: %s' % json.dumps(answer))
+					time.sleep(self.errors_sleep)
+				else:
+					Logger().warning('Twitter returned unexpected error %d: %s ' (e.code, json.dumps(answer)))
+					return False
 			except:
 				Logger().warning('Something went wrong while getting twitter api answer')
+				time.sleep(self.errors_sleep)
 
 
 class BasicAuthTwitterAPI(Twitter):
@@ -227,37 +240,58 @@ class BasicAuthTwitterAPI(Twitter):
 	def __init__(self, user, password):
 		self.user = user
 		self.password = password
-		self.api_opener = urllib.URLopener()
+		self.api_opener = urllib2.build_opener()
 
-	def __get_url(self, url):
-		return url[:url.find('://')+3]+self.user+':'+self.password+'@'+url[url.find('://')+3:]
+	def __add_auth_header(self, request):
+		raw = '%s:%s' % (self.user, self.password)
+		auth = 'Basic %s' % base64.b64encode(raw).strip()
+		request.add_header('Authorization', auth)
+		return request
 
 	def _get_api_data(self, url):
-		connection = self.api_opener.open(self.__get_url(url))
+		request = urllib2.Request(url)
+		self.__add_auth_header(request)
+		connection = self.api_opener.open(request)
 		answer = connection.read()
 		connection.close()
 		return answer
 
 	def send_notification(self, user_id, message):
-		url = self.__get_url('https://twitter.com/direct_messages/new.json')
+		# TODO: move to common class
+		url = urllib2.Request('https://twitter.com/direct_messages/new.json')
+		self.__add_auth_header(url)
 		data = {'user_id': user_id, 'text': message}
 		while True:
 			try:
 				connection = self.api_opener.open(url, urllib.urlencode(data))
+				answer = json.loads(connection.read())
 				connection.close()
 				Logger().info('Send message to %s: %s' % (data['user_id'], data['text']))
 				break
 			except KeyboardInterrupt:
 				Logger().warning('Got keyboard interrupt, exiting')
 				exit()
-			except IOError, error_code:
-				if error_code[0] == "http error":
-					if error_code[1] == 403:
-						Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
-						break
-					Logger().warning('Got HTTP error %s error from twitter, trying again' % error_code[1])
+			except urllib2.HTTPError, e:
+				try:
+					answer = json.loads(e.read())
+				except:
+					continue
+				if e.code == 403:
+					if answer.has_key('error') and answer.has_key('request'):
+						Logger().warning('Couldn\'t send message, twitter returned error: %s' % json.dumps(answer))
+						time.sleep(self.errors_sleep)
+						continue
+					Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
+					break
+				elif e.code == 404:
+					Logger().debug('Got HTTP error 404 for %s' % path)
+					break
+				else:
+					Logger().warning('Twitter returned unexpected error on DM send %d: %s ' % (e.code, json.dumps(answer)))
+					break
 			except:
 				Logger().warning('Oops, something wrong with twitter. Trying again')
+				time.sleep(self.errors_sleep)
 
 
 class OAuthTwitterAPI(Twitter):
@@ -285,7 +319,7 @@ class OAuthTwitterAPI(Twitter):
 		self.token = oauth.OAuthToken(oauth_token, oauth_token_secret)
 		self.consumer = consumer
 		self.signature_method = oauth.OAuthSignatureMethod_HMAC_SHA1()
-		self.api_opener = urllib.URLopener()
+		self.api_opener = urllib2.build_opener()
 
 	def _get_api_data(self, url):
 		if url.find('?') != -1:
