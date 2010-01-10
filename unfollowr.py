@@ -278,6 +278,8 @@ class BasicAuthTwitterAPI(Twitter):
 					continue
 				if e.code == 403:
 					if answer.has_key('error') and answer.has_key('request'):
+						if answer['error'] == 'You cannot send messages to users who are not following you.':
+							break
 						Logger().warning('Couldn\'t send message, twitter returned error: %s' % json.dumps(answer))
 						time.sleep(self.errors_sleep)
 						continue
