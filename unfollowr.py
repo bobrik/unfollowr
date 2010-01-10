@@ -128,7 +128,7 @@ class Twitter:
 	def verify_credentials(self):
 		"""Verify if user credentials correct"""
 		url = 'https://twitter.com/account/verify_credentials.json'
-		if self.get_api_data(url) == False:
+		if self.get_api_data(url, True) == False:
 			return False
 		else:
 			return True
@@ -441,12 +441,12 @@ class Unfollowr:
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
-			if user_twitter_api.get_remaining_hits() < OAuthTwitterAPI.min_requests_to_process:
-				Logger().warning('Too low remaining requests to process via OAuth, skipping')
-				return False
 			if user_twitter_api.verify_credentials() != False:
-				Logger().warning('Using OAuth to get followers of %s' % user_id)
-				return user_twitter_api.get_followers(user_id)
+				if user_twitter_api.get_remaining_hits() < OAuthTwitterAPI.min_requests_to_process:
+					Logger().warning('Using OAuth to get followers of %s' % user_id)
+					return user_twitter_api.get_followers(user_id)
+				else:
+					Logger().warning('Too low remaining requests to process via OAuth, trying using own requests')
 			else:
 				self.twitter.send_notification(user_id, 'Warning: your OAuth data was revoked or become incorrect')
 				Logger().warning('OAuth login info is incorrect, revoking it')
