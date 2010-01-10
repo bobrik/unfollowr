@@ -445,7 +445,7 @@ class Unfollowr:
 				if user_twitter_api.get_remaining_hits() < OAuthTwitterAPI.min_requests_to_process:
 					Logger().warning('Using OAuth to get followers of %s' % user_id)
 					user_followers = user_twitter_api.get_followers(user_id)
-					if user_followers != False
+					if user_followers != False:
 						return user_followers
 					else:
 						Logger().warning('Couldn\'t get followers with OAuth, trying using own requests')
