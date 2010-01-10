@@ -167,6 +167,15 @@ class Twitter:
 			Logger().debug('No username for user %d' % int(user_id))
 			return False
 
+	def get_remaining_hits(self):
+		"""Returns remaining hits"""
+		url = 'https://twitter.com/account/rate_limit_status.json'
+		data = self.get_api_data(url, True)
+		if data.has_key('remaining_hits'):
+			return data['remaining_hits']
+		else:
+			return False
+
 	def check_hourly_limit(self):
 		"""Checks if hourly request limit reached. In this case, falls asleep suddenly"""
 		url = 'https://twitter.com/account/rate_limit_status.json'
@@ -254,6 +263,7 @@ class BasicAuthTwitterAPI(Twitter):
 class OAuthTwitterAPI(Twitter):
 
 	check_rate_limit = True
+	min_requests_to_process = 20
 
 	def __init__(self, user, oauth_token, oauth_token_secret, consumer):
 		self.__init_common(user, oauth_token, oauth_token_secret, consumer)
@@ -431,6 +441,9 @@ class Unfollowr:
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
+			if user_twitter_api.get_remaining_hits() < OAuthTwitterAPI.min_requests_to_process:
+				Logger().warning('Too low remaining requests to process via OAuth, skipping')
+				return False
 			if user_twitter_api.verify_credentials() != False:
 				Logger().warning('Using OAuth to get followers of %s' % user_id)
 				return user_twitter_api.get_followers(user_id)
