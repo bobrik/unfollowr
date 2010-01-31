@@ -306,7 +306,7 @@ class BasicAuthTwitterAPI(Twitter):
 								Logger().warning('User %d was suspended, skipping' % user_id)
 								return False
 						Logger().warning('Couldn\'t send message, twitter returned error: %s' % json.dumps(answer))
-						time.sleep(self.errors_sleep)
+						#time.sleep(self.errors_sleep)
 						return False
 					Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
 					return False
