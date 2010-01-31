@@ -93,27 +93,47 @@ class Logger(object):
 class DBStore:
 	"""Class to store unfollows information to database"""
 	def __init__(self, host, user, passwd, db):
-		try:
-			conn = MySQLdb.connect( host   = host,
-									user   = user,
-									passwd = passwd,
-									db     = db)
-		except MySQLdb.Error, e:
-			Logger().warning('Couldn\'t connect to MySQL database. %d: %s' % (e.args[0], e.args[1]))
-			exit(1)
+		self.host = host
+		self.user = user
+		self.passwd = passwd
+		self.db = db
+		self.__connect()
+
+	def __connect(self):
+		while True:
+			try:
+				conn = MySQLdb.connect(
+					host   = self.host,
+					user   = self.user,
+					passwd = self.passwd,
+					db     = self.db)
+				Logger().warning('Successfully [re]connected to MySQL server '+self.host+' as '+self.user)
+				break
+			except MySQLdb.Error, e:
+				Logger().warning('Couldn\'t connect to MySQL database. %d: %s' % (e.args[0], e.args[1]))
+				time.sleep(10)
 		self.cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+
+	def execute(self, query):
+		try:
+			self.cursor.execute(query)
+		except MySQLdb.Error, e:
+			# trying to reconnect to make another query
+			self.__connect()
+			self.cursor.execute(query)
+
 	def save_unfollows(self, user_id, unfollowers):
 		for unfollower_id in unfollowers.keys():
-			self.cursor.execute("INSERT INTO unfollowr_unfollows "+
+			self.execute("INSERT INTO unfollowr_unfollows "+
 				"(`user_id`, `unfollower_id`, `unfollower_name`, `date`) "+
 				" VALUES ('%d', '%d', '%s', NOW())" % (user_id, unfollower_id, unfollowers[unfollower_id]))
 
 	def start_timer(self):
-		self.cursor.execute('INSERT INTO unfollowr_iterations (start_time, stop_time) values (now(), now())')
+		self.execute('INSERT INTO unfollowr_iterations (start_time, stop_time) values (now(), now())')
 		return self.cursor.lastrowid
 
 	def stop_timer(self, timer):
-		self.cursor.execute('UPDATE unfollowr_iterations SET stop_time = "'+time.strftime('%Y-%m-%d %H:%M:%S')+'" WHERE id = %d' % timer)
+		self.execute('UPDATE unfollowr_iterations SET stop_time = "'+time.strftime('%Y-%m-%d %H:%M:%S')+'" WHERE id = %d' % timer)
 
 
 class Twitter:
@@ -267,7 +287,7 @@ class BasicAuthTwitterAPI(Twitter):
 				answer = json.loads(connection.read())
 				connection.close()
 				Logger().info('Send message to %s: %s' % (data['user_id'], data['text']))
-				break
+				return True
 			except KeyboardInterrupt:
 				Logger().warning('Got keyboard interrupt, exiting')
 				exit()
@@ -275,22 +295,27 @@ class BasicAuthTwitterAPI(Twitter):
 				try:
 					answer = json.loads(e.read())
 				except:
+					Logger().warning('Can\'t send direct message to user %s, twitter returned not JSON answer' % user_id)
 					continue
 				if e.code == 403:
 					if answer.has_key('error') and answer.has_key('request'):
 						if answer['error'] == 'You cannot send messages to users who are not following you.':
-							break
+							return False
+						if asnwer['error'] == 'There was an error sending your message: You can\'t send direct messages to this user right now':
+							if self.get_screen_name(user_id) == False:
+								Logger().warning('User %d was suspended, skipping' % user_id)
+								return False
 						Logger().warning('Couldn\'t send message, twitter returned error: %s' % json.dumps(answer))
 						time.sleep(self.errors_sleep)
-						continue
+						return False
 					Logger().warning('Can\'t send direct message to user %s, probably suspended' % user_id)
-					break
+					return False
 				elif e.code == 404:
 					Logger().debug('Got HTTP error 404 for %s' % path)
-					break
+					return False
 				else:
 					Logger().warning('Twitter returned unexpected error on DM send %d: %s ' % (e.code, json.dumps(answer)))
-					break
+					return False
 			except:
 				Logger().warning('Oops, something wrong with twitter. Trying again')
 				time.sleep(self.errors_sleep)
@@ -399,6 +424,7 @@ class Unfollowr:
 	"""Unfollowr main application class"""
 	iterations_sleep = 300
 	twitter = None
+	message = 'Tweeps that no longer following you: '
 
 	def __init__(self):
 		try:
@@ -459,13 +485,11 @@ class Unfollowr:
 							unfollower_name = 'suspended'
 						named_user_unfollowers[unfollower_id] = unfollower_name
 					Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
-					self.dbstore.save_unfollows(user_id, named_user_unfollowers)
+					remaining_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
+					if remaining_unfollowers != True:
+						Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
+						user_followers.extend(remaining_unfollowers)
 					user.update_followers(user_followers)
-					notification_list = [x for x in named_user_unfollowers.values() if x != 'suspended']
-					suspended_unfolllowers_count = len([x for x in named_user_unfollowers.values() if x == 'suspended'])
-					if suspended_unfolllowers_count > 0:
-						notification_list.append('suspended (count: %d)' % suspended_unfolllowers_count)
-					self.send_unfollowed_notifications(user_id, notification_list)
 			else:
 				Logger.warning('Could not get list of my followers!')
 			self.dbstore.stop_timer(timer)
@@ -478,7 +502,7 @@ class Unfollowr:
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
 			if user_twitter_api.verify_credentials() != False:
-				if user_twitter_api.get_remaining_hits() < OAuthTwitterAPI.min_requests_to_process:
+				if user_twitter_api.get_remaining_hits() > OAuthTwitterAPI.min_requests_to_process:
 					Logger().warning('Using OAuth to get followers of %s' % user_id)
 					user_followers = user_twitter_api.get_followers(user_id)
 					if user_followers != False:
@@ -500,23 +524,32 @@ class Unfollowr:
 				Logger().debug('User %s has already been notified about OAuth access' % user_id)
 		return user_followers
 
-	def send_unfollowed_notifications(self, user, user_unfollowers):
+	def send_unfollowed_notifications(self, user, named_unfollowers):
 		"""Send message to user about unfollows"""
-		message = 'Tweeps that no longer following you: '
-		for pack in self.split_to_packs(user_unfollowers):
-			self.twitter.send_notification(user, message+pack)
+		# TODO: make generators readable/not generators/smaller
+		notification_list = dict(('@'+str(named_unfollowers[id]), id) for id in named_unfollowers if named_unfollowers[id] != 'suspended')
+		suspended_unfollowers_count = len([x for x in named_unfollowers.values() if x == 'suspended'])
+		if suspended_unfollowers_count > 0:
+			notification_list['@suspended (count: %d)' % suspended_unfollowers_count] = [id for id in named_unfollowers if named_unfollowers[id] == 'suspended']
+		while len(notification_list) > 0:
+			message = self.message
+			message_unfollowers = {}
+			# SUDDENLY!!1 Paustovsky
+			item = notification_list.popitem()
+			message_unfollowers[item[0]] = item[1]
+			while len(message + ', '.join([name for name in message_unfollowers.keys()])) < 140 and len(notification_list) > 0:
+				item = notification_list.popitem()
+				message_unfollowers[item[0]] = item[1]
+			result = self.twitter.send_notification(user, message + ', '.join([name for name in message_unfollowers.keys()]))
+			if result != True:
+				notification_list.update(message_unfollowers)
+				unsuccessful = [id for id in notification_list.values() if type(id) == int]
+				for ids in notification_list:
+					if type(ids) == list:
+						unsuccessful.extend(ids)
+				return unsuccessful
+		return True
 
-	def split_to_packs(self, data, max_pack_length=90):
-		"""Split usernames to packs shorter than maximum pack length"""
-		data = copy.copy(data) # we don't want to affect on data
-		packs = []
-		while len(data) > 0:
-			element = str(data.pop())
-			pack = '@'+element
-			while len(data) > 0 and len(pack) < max_pack_length:
-				pack += ', @'+str(data.pop())
-			packs.append(pack)
-		return packs
 
 
 if __name__ == '__main__':
