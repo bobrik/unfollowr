@@ -544,7 +544,7 @@ class Unfollowr:
 			if result != True:
 				notification_list.update(message_unfollowers)
 				unsuccessful = [id for id in notification_list.values() if type(id) == int]
-				for ids in notification_list:
+				for ids in notification_list.values():
 					if type(ids) == list:
 						unsuccessful.extend(ids)
 				return unsuccessful
