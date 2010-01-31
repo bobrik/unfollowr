@@ -301,7 +301,7 @@ class BasicAuthTwitterAPI(Twitter):
 					if answer.has_key('error') and answer.has_key('request'):
 						if answer['error'] == 'You cannot send messages to users who are not following you.':
 							return False
-						if asnwer['error'] == 'There was an error sending your message: You can\'t send direct messages to this user right now':
+						if answer['error'] == 'There was an error sending your message: You can\'t send direct messages to this user right now':
 							if self.get_screen_name(user_id) == False:
 								Logger().warning('User %d was suspended, skipping' % user_id)
 								return False
