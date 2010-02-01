@@ -490,6 +490,7 @@ class Unfollowr:
 						Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
 						user_followers.extend(remaining_unfollowers)
 					user.update_followers(user_followers)
+					self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers.count(id) == 0)
 			else:
 				Logger.warning('Could not get list of my followers!')
 			self.dbstore.stop_timer(timer)
@@ -540,6 +541,9 @@ class Unfollowr:
 			while len(message + ', '.join([name for name in message_unfollowers.keys()])) < 140 and len(notification_list) > 0:
 				item = notification_list.popitem()
 				message_unfollowers[item[0]] = item[1]
+			if len(message + ', '.join([name for name in message_unfollowers.keys()])) > 140:
+				item = message_unfollowers.popitem()
+				notification_list[item[0]] = item[1]
 			result = self.twitter.send_notification(user, message + ', '.join([name for name in message_unfollowers.keys()]))
 			if result != True:
 				notification_list.update(message_unfollowers)
