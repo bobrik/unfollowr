@@ -490,7 +490,7 @@ class Unfollowr:
 						Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
 						user_followers.extend(remaining_unfollowers)
 					user.update_followers(user_followers)
-					self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers.count(id) == 0))
+					self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers != False && remaining_unfollowers.count(id) == 0))
 			else:
 				Logger.warning('Could not get list of my followers!')
 			self.dbstore.stop_timer(timer)
