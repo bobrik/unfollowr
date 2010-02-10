@@ -175,6 +175,21 @@ class Twitter:
 				followers += data['ids']
 		return followers
 
+	def get_friends(self, user):
+		"""User friends (followings)"""
+		url = 'https://twitter.com/friends/ids/%s.json' % user
+		friends = []
+		next_cursor = -1
+		while next_cursor != 0:
+			page_url = url+'?cursor=%d' % next_cursor
+			data = self.get_api_data(page_url)
+			if data == False or not data.has_key('next_cursor') or not data.has_key('ids'):
+				return False
+			else:
+				next_cursor = data['next_cursor']
+				friends += data['ids']
+		return friends
+
 	def get_followers_old(self, user):
 		"""User followers"""
 		url = 'https://twitter.com/followers/ids/%s.json' % user
@@ -468,35 +483,54 @@ class Unfollowr:
 		while True:
 			timer = self.dbstore.start_timer()
 			followers = self.twitter.get_followers(self.user)
+			result = False
 			if followers != False:
 				for i, user_id in enumerate(followers):
 					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
-					user_followers = self.get_user_followers(user_id)
-					if user_followers == False:
-						Logger().warning('Couldn\'t get list of follwers for %s, skipping' % user_id)
-						continue
-					user = User(user_id)
-					user_unfollowers = user.get_unfollows(user_followers)
-					named_user_unfollowers = {}
-					unfollowers_names = []
-					for unfollower_id in user_unfollowers:
-						unfollower_name = self.twitter.get_screen_name(unfollower_id)
-						if unfollower_name == False:
-							unfollower_name = 'suspended'
-						named_user_unfollowers[unfollower_id] = unfollower_name
-					Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
-					remaining_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
-					if remaining_unfollowers != True:
-						Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
-						user_followers.extend(remaining_unfollowers)
-					user.update_followers(user_followers)
-					self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers != True and remaining_unfollowers.count(id) == 0))
+					if self.process_user != False:
+						if result == False:
+							result = True
+							self.calculate_followings()
+					else:
+						result = False
 			else:
 				Logger.warning('Could not get list of my followers!')
 			self.dbstore.stop_timer(timer)
 			if self.iterations_sleep > 0:
 				Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
 				time.sleep(self.iterations_sleep)
+
+	def calculate_followings(self):
+		"""Follow best people and calculate them frequently. As fast as possible"""
+		friends = self.twitter.get_friends(self.user)
+		if friends != False:
+			for i, user_id in enumerate(friends):
+				Logger().warning('Processing friend #%d from %d' % (i+1, len(friends)))
+				self.process_user(user_id)
+
+	def process_user(self, user_id):
+		"""Processing one user unfollows"""
+		user_followers = self.get_user_followers(user_id)
+		if user_followers == False:
+			Logger().warning('Couldn\'t get list of follwers for %s, skipping' % user_id)
+			return True
+		user = User(user_id)
+		user_unfollowers = user.get_unfollows(user_followers)
+		named_user_unfollowers = {}
+		unfollowers_names = []
+		for unfollower_id in user_unfollowers:
+			unfollower_name = self.twitter.get_screen_name(unfollower_id)
+			if unfollower_name == False:
+				unfollower_name = 'suspended'
+			named_user_unfollowers[unfollower_id] = unfollower_name
+		Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
+		remaining_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
+		if remaining_unfollowers != True:
+			Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
+			user_followers.extend(remaining_unfollowers)
+		user.update_followers(user_followers)
+		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers != True and remaining_unfollowers.count(id) == 0))
+		return remaining_unfollowers == True
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
