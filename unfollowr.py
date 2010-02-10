@@ -487,7 +487,7 @@ class Unfollowr:
 			if followers != False:
 				for i, user_id in enumerate(followers):
 					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
-					if self.process_user != False:
+					if self.process_user(user_id) != False:
 						if result == False:
 							result = True
 							self.calculate_followings()
