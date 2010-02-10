@@ -524,13 +524,14 @@ class Unfollowr:
 				unfollower_name = 'suspended'
 			named_user_unfollowers[unfollower_id] = unfollower_name
 		Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
-		remaining_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
-		if remaining_unfollowers != True:
-			Logger().warning('Couldn\'t notify about next unfollows: '+str(remaining_unfollowers))
-			user_followers.extend(remaining_unfollowers)
+		unsuccessful_notify_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
+		if unsuccessful_notify_unfollowers != True:
+			Logger().warning('Couldn\'t notify about next unfollows: '+str(unsuccessful_notify_unfollowers))
+			user_followers.extend(unsuccessful_notify_unfollowers)
 		user.update_followers(user_followers)
-		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if remaining_unfollowers != True and remaining_unfollowers.count(id) == 0))
-		return remaining_unfollowers == True
+		Logger().debug('Storing unfollows: '+str(dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0)))
+		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0))
+		return unsuccessful_notify_unfollowers == True
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
