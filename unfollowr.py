@@ -531,7 +531,7 @@ class Unfollowr:
 		user.update_followers(user_followers)
 		Logger().debug('Storing unfollows: '+str(dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0)))
 		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0))
-		return unsuccessful_notify_unfollowers == True
+		return unsuccessful_notify_unfollowers == True && len(user_unfollowers) > 0
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
