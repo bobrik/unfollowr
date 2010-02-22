@@ -439,6 +439,8 @@ class Unfollowr:
 	"""Unfollowr main application class"""
 	iterations_sleep = 300
 	twitter = None
+	premium_users_file = 'unfollowr.premium'
+	premium_processing_frequency = 1000
 	message = 'Tweeps that no longer following you: '
 
 	def __init__(self):
@@ -487,10 +489,12 @@ class Unfollowr:
 			if followers != False:
 				for i, user_id in enumerate(followers):
 					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
-					if self.process_user(user_id) != False:
+					if self.process_user(user_id, result) == True:
 						if result == False:
 							result = True
-							self.calculate_followings()
+							self.calculate_premium()
+						elif i % self.premium_processing_frequency == 0:
+							self.calculate_premium()
 					else:
 						result = False
 			else:
@@ -500,20 +504,41 @@ class Unfollowr:
 				Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
 				time.sleep(self.iterations_sleep)
 
-	def calculate_followings(self):
-		"""Follow best people and calculate them frequently. As fast as possible"""
-		friends = self.twitter.get_friends(self.user)
-		if friends != False:
-			for i, user_id in enumerate(friends):
-				Logger().warning('Processing friend #%d from %d' % (i+1, len(friends)))
+	def calculate_premium(self):
+		"""Calculate donators and just good people"""
+		#self.process_userlist(self.twitter.get_friends(self.user), 'friends')
+		self.process_userlist(self.get_premium(), 'premium')
+
+
+	def get_premium(self):
+		"""Returns list of premium user ids"""
+		users = []
+		try:
+			# file format: user_id => any comments about user (e.g. username, email, donation info)
+			with open(self.premium_users_file) as users_file:
+				for user in users_file:
+					try:
+						user_id, description = user.split(' => ')
+						users.append(int(user_id))
+					except:
+						pass # allow empty lines
+		except IOError:
+			Logger().warning('Couldn\'t open premium users file')
+		return users
+
+	def process_userlist(self, users, list_name):
+		"""Processes any list of user ids, one-time"""
+		if users != False:
+			for i, user_id in enumerate(users):
+				Logger().warning('Processing user #%d from %d (list: %s)' % (i+1, len(users), list_name))
 				self.process_user(user_id)
 
-	def process_user(self, user_id):
+	def process_user(self, user_id, last_successfull = True):
 		"""Processing one user unfollows"""
 		user_followers = self.get_user_followers(user_id)
 		if user_followers == False:
 			Logger().warning('Couldn\'t get list of follwers for %s, skipping' % user_id)
-			return True
+			return last_successfull
 		user = User(user_id)
 		user_unfollowers = user.get_unfollows(user_followers)
 		named_user_unfollowers = {}
@@ -531,7 +556,7 @@ class Unfollowr:
 		user.update_followers(user_followers)
 		Logger().debug('Storing unfollows: '+str(dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0)))
 		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0))
-		return unsuccessful_notify_unfollowers == True and len(user_unfollowers) > 0
+		return (unsuccessful_notify_unfollowers == True and len(user_unfollowers) > 0) or last_successfull
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
