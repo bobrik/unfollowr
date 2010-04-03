@@ -128,12 +128,21 @@ class DBStore:
 				"(`user_id`, `unfollower_id`, `unfollower_name`, `date`) "+
 				" VALUES ('%d', '%d', '%s', NOW())" % (user_id, unfollower_id, unfollowers[unfollower_id]))
 
-	def start_timer(self):
-		self.execute('INSERT INTO unfollowr_iterations (start_time, stop_time) values (now(), now())')
+	def start_timer(self, followers_count):
+		self.execute('INSERT INTO unfollowr_iterations (start_time, stop_time, followers_count) VALUES (NOW(), NOW(), %d)' % followers_count)
 		return self.cursor.lastrowid
 
 	def stop_timer(self, timer):
 		self.execute('UPDATE unfollowr_iterations SET stop_time = "'+time.strftime('%Y-%m-%d %H:%M:%S')+'" WHERE id = %d' % timer)
+
+	def update_user(self, user_id, data):
+		if len(data) > 0:
+			sql  = 'REPLACE INTO unfollowr_users SET '
+			sql += ', '.join(map(lambda name: str(name)+' = "'+MySQLdb.escape_string(str(data[name]))+'"', data.keys()))
+			sql += ', id = %d' % user_id
+			self.execute(sql)
+		else:
+			Logger().warning('No data for update provided')
 
 
 class Twitter:
@@ -142,7 +151,7 @@ class Twitter:
 	min_available_api_requests = 10
 	rate_checking_sleep = 120
 	request_sleep = 0
-	errors_sleep = 120
+	errors_sleep = 5
 
 	def __init__(self):
 		Logger().warning('You must not use Twitter class directly, use its descedants')
@@ -163,7 +172,7 @@ class Twitter:
 	def get_followers(self, user):
 		"""User followers"""
 		url = 'https://twitter.com/followers/ids/%s.json' % user
-		followers = []
+		followers = set()
 		next_cursor = -1
 		while next_cursor != 0:
 			page_url = url+'?cursor=%d' % next_cursor
@@ -172,13 +181,13 @@ class Twitter:
 				return False
 			else:
 				next_cursor = data['next_cursor']
-				followers += data['ids']
+				followers = followers.union(set(data['ids']))
 		return followers
 
 	def get_friends(self, user):
 		"""User friends (followings)"""
 		url = 'https://twitter.com/friends/ids/%s.json' % user
-		friends = []
+		friends = set()
 		next_cursor = -1
 		while next_cursor != 0:
 			page_url = url+'?cursor=%d' % next_cursor
@@ -187,13 +196,8 @@ class Twitter:
 				return False
 			else:
 				next_cursor = data['next_cursor']
-				friends += data['ids']
+				friends = friends.union(set(data['ids']))
 		return friends
-
-	def get_followers_old(self, user):
-		"""User followers"""
-		url = 'https://twitter.com/followers/ids/%s.json' % user
-		return self.get_api_data(url)
 
 	def get_screen_name(self, user_id):
 		"""User screen_name by id"""
@@ -399,26 +403,24 @@ class User:
 
 	def get_unfollows(self, followers):
 		"""Returns user unfollowers list"""
-		unfollows = []
+		unfollows = set()
 		if len(followers) == 0:
 			Logger().debug('User %s has no followers,skipping' % self.id)
 			return unfollows
 		past_followers = self.get_followers()
-		for past_follower in past_followers:
-			if not past_follower in followers:
-				unfollows.append(past_follower)
+		unfollows = past_followers.difference(followers)
 		return unfollows
 
 	def get_followers(self):
-		"""Reads user followers from file and returns them as list"""
-		followers_list = []
+		"""Reads user followers from file and returns them as set"""
+		followers_set = set()
 		try:
 			with open(self.get_filename('followers')) as followers_file:
 				for follower in followers_file:
-					followers_list.append(int(follower))
+					followers_set.add(int(follower))
 		except IOError:
 			pass
-		return followers_list
+		return followers_set
 
 	def update_followers(self, followers):
 		"""Saves user followers to file"""
@@ -426,22 +428,18 @@ class User:
 			for follower in followers:
 				followers_file.write(str(follower)+'\n')
 
-	def append_followers(self, followers):
-		"""Append additional user followers and save full list"""
-		past_followers = self.get_followers()
-		Logger().debug('Once upon a time, %s had %d followers' % (len(past_followers), self.id))
-		past_followers += followers
-		self.update_followers(followers)
-		Logger().debug('Currently %s has %d followers' % (len(past_followers), self.id))
-
 
 class Unfollowr:
 	"""Unfollowr main application class"""
 	iterations_sleep = 300
 	twitter = None
 	premium_users_file = 'unfollowr.premium'
-	premium_processing_frequency = 1000
-	message = 'Tweeps that no longer following you: '
+	premium_processing_frequency = 2000
+	skiplist_file = 'unfollowr.skip'
+	skiplist_refresh_interval = 1000
+	skiplist = set()
+	message = 'Unfollowers: '
+	resolve_processing_username = False
 
 	def __init__(self):
 		try:
@@ -480,15 +478,33 @@ class Unfollowr:
 			if not os.path.exists(os.path.join(os.path.dirname(__file__), directory)):
 				os.mkdir(os.path.join(os.path.dirname(__file__), directory))
 
+	def refresh_skiplist(self):
+		"""Refresh list of users to skip"""
+		self.skiplist = set()
+		try:
+			with open(self.skiplist_file) as skiplist_file:
+				for user_id in skiplist_file:
+					self.skiplist.add(int(user_id))
+		except:
+			Logger().warning('Couldn\'t open skiplist file! It\'s optional, don\'t worry')
+		Logger().debug('Current skiplist: %s' % str(self.skiplist))
+
 	def start(self):
 		"""Main application loop"""
 		while True:
-			timer = self.dbstore.start_timer()
 			followers = self.twitter.get_followers(self.user)
-			result = False
+			result = True # FIXME: not checking friends first if it is True
 			if followers != False:
+				timer = self.dbstore.start_timer(len(followers))
+				#followers.reverse()
 				for i, user_id in enumerate(followers):
+					if i % self.skiplist_refresh_interval == 0:
+						self.refresh_skiplist()
 					Logger().info('Processing user #%d from %d' % (i+1, len(followers)))
+					user_followers = self.twitter.get_followers(user_id)
+					if user_followers != False and len(user_followers) > 3000:
+						Logger().debug("User has more than 3000 followers, skipping")
+						continue
 					if self.process_user(user_id, result) == True:
 						if result == False:
 							result = True
@@ -497,29 +513,28 @@ class Unfollowr:
 							self.calculate_premium()
 					else:
 						result = False
+				self.dbstore.stop_timer(timer)
 			else:
-				Logger.warning('Could not get list of my followers!')
-			self.dbstore.stop_timer(timer)
+				Logger.warning('ZOMG! Could not get list of my followers!')
 			if self.iterations_sleep > 0:
 				Logger().info('Sleeping before next iteration for %d seconds' % self.iterations_sleep)
 				time.sleep(self.iterations_sleep)
 
 	def calculate_premium(self):
 		"""Calculate donators and just good people"""
-		#self.process_userlist(self.twitter.get_friends(self.user), 'friends')
+		self.process_userlist(self.twitter.get_friends(self.user), 'friends')
 		self.process_userlist(self.get_premium(), 'premium')
-
 
 	def get_premium(self):
 		"""Returns list of premium user ids"""
-		users = []
+		users = set()
 		try:
 			# file format: user_id => any comments about user (e.g. username, email, donation info)
 			with open(self.premium_users_file) as users_file:
 				for user in users_file:
 					try:
 						user_id, description = user.split(' => ')
-						users.append(int(user_id))
+						users.add(int(user_id))
 					except:
 						pass # allow empty lines
 		except IOError:
@@ -528,13 +543,31 @@ class Unfollowr:
 
 	def process_userlist(self, users, list_name):
 		"""Processes any list of user ids, one-time"""
+		latest_own_followers = self.twitter.get_followers(self.user)
 		if users != False:
 			for i, user_id in enumerate(users):
 				Logger().warning('Processing user #%d from %d (list: %s)' % (i+1, len(users), list_name))
-				self.process_user(user_id)
+				if user_id not in latest_own_followers:
+					username = self.twitter.get_screen_name(user_id)
+					if username == False:
+						username = str(user_id)+' (username could not be resolved!)'
+					else:
+						username = '@'+username
+					Logger().warning('User %s from list %s doesn\'t follow us, skipping' % (username, list_name))
+				else:
+					self.process_user(user_id)
 
 	def process_user(self, user_id, last_successfull = True):
 		"""Processing one user unfollows"""
+		if user_id in self.skiplist:
+			Logger().warning('Skipping user because of skiplist')
+			return last_successfull
+		if self.resolve_processing_username == True:
+			username = self.twitter.get_screen_name(user_id)
+			if username != False:
+				Logger().warning('Processing user @%s' % username)
+			else:
+				Logger().warning('Couldn\t resolve username for %d' % user_id)
 		user_followers = self.get_user_followers(user_id)
 		if user_followers == False:
 			Logger().warning('Couldn\'t get list of follwers for %s, skipping' % user_id)
@@ -542,21 +575,26 @@ class Unfollowr:
 		user = User(user_id)
 		user_unfollowers = user.get_unfollows(user_followers)
 		named_user_unfollowers = {}
-		unfollowers_names = []
 		for unfollower_id in user_unfollowers:
 			unfollower_name = self.twitter.get_screen_name(unfollower_id)
 			if unfollower_name == False:
 				unfollower_name = 'suspended'
 			named_user_unfollowers[unfollower_id] = unfollower_name
 		Logger().debug('Unfollowed '+str(user_id)+': '+str(named_user_unfollowers))
-		unsuccessful_notify_unfollowers = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
-		if unsuccessful_notify_unfollowers != True:
-			Logger().warning('Couldn\'t notify about next unfollows: '+str(unsuccessful_notify_unfollowers))
-			user_followers.extend(unsuccessful_notify_unfollowers)
+		not_notified_unfollows = self.send_unfollowed_notifications(user_id, named_user_unfollowers)
+		if not_notified_unfollows != False:
+			Logger().warning('Couldn\'t notify about next unfollows: '+str(not_notified_unfollows))
+			user_followers.update(not_notified_unfollows)
 		user.update_followers(user_followers)
-		Logger().debug('Storing unfollows: '+str(dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0)))
-		self.dbstore.save_unfollows(user_id, dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if unsuccessful_notify_unfollowers == True or unsuccessful_notify_unfollowers.count(id) == 0))
-		return (unsuccessful_notify_unfollowers == True and len(user_unfollowers) > 0) or last_successfull
+		unfollows_to_store = dict((id, named_user_unfollowers[id]) for id in named_user_unfollowers if not_notified_unfollows == False or id not in not_notified_unfollows)
+		Logger().debug('Storing unfollows: '+str(unfollows_to_store))
+		self.dbstore.save_unfollows(user_id, unfollows_to_store)
+		if not_notified_unfollows == False:
+			unfollows_in_queue = 0
+		else:
+			unfollows_in_queue = len(not_notified_unfollows)
+		self.dbstore.update_user(user_id, {'last_check': MySQLdb.times.format_TIMESTAMP(time), 'unfollows_in_queue':  unfollows_in_queue })
+		return (not_notified_unfollows == False and len(user_unfollowers) > 0) or last_successfull
 
 	def get_user_followers(self, user_id):
 		"""Returns user's followers. Tries to use provided OAuth access, if any and necessary"""
@@ -578,9 +616,10 @@ class Unfollowr:
 		user_followers = self.twitter.get_followers(user_id)
 		if user_followers == False:
 			if not os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified')):
-				self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow me OAuth access: http://bobrik.name/unfollowr/')
-				file = open(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified'), 'w')
-				file.close()
+				notified = self.twitter.send_notification(user_id, 'Looks like we can\'t get your followers list (protected account?). Please allow me OAuth access: http://bobrik.name/unfollowr/')
+				if notified:
+					file = open(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth.notified'), 'w')
+					file.close()
 			else:
 				Logger().debug('User %s has already been notified about OAuth access' % user_id)
 		return user_followers
@@ -589,11 +628,16 @@ class Unfollowr:
 		"""Send message to user about unfollows"""
 		# TODO: make generators readable/not generators/smaller
 		notification_list = dict(('@'+str(named_unfollowers[id]), id) for id in named_unfollowers if named_unfollowers[id] != 'suspended')
-		suspended_unfollowers_count = len([x for x in named_unfollowers.values() if x == 'suspended'])
-		if suspended_unfollowers_count > 0:
-			notification_list['@suspended (count: %d)' % suspended_unfollowers_count] = [id for id in named_unfollowers if named_unfollowers[id] == 'suspended']
+		suspended_count = named_unfollowers.values().count('suspended')
+		if suspended_count > 0:
+			notification_list['@suspended (count: %d)' % suspended_count] = set(id for id in named_unfollowers if named_unfollowers[id] == 'suspended')
+		message_chain_initialized = False
 		while len(notification_list) > 0:
-			message = self.message
+			if not message_chain_initialized:
+				message = self.message
+				message_chain_initialized = True
+			else:
+				message = ''
 			message_unfollowers = {}
 			# SUDDENLY!!1 Paustovsky
 			item = notification_list.popitem()
@@ -604,15 +648,15 @@ class Unfollowr:
 			if len(message + ', '.join([name for name in message_unfollowers.keys()])) > 140:
 				item = message_unfollowers.popitem()
 				notification_list[item[0]] = item[1]
-			result = self.twitter.send_notification(user, message + ', '.join([name for name in message_unfollowers.keys()]))
+			result = self.twitter.send_notification(user, message+', '.join([name for name in message_unfollowers.keys()]))
 			if result != True:
 				notification_list.update(message_unfollowers)
-				unsuccessful = [id for id in notification_list.values() if type(id) == int]
+				unsuccessful = set(id for id in notification_list.values() if type(id) == int)
 				for ids in notification_list.values():
-					if type(ids) == list:
-						unsuccessful.extend(ids)
+					if type(ids) == set: # suspended users
+						unsuccessful.update(set(ids))
 				return unsuccessful
-		return True
+		return False
 
 
 
