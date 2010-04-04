@@ -147,8 +147,10 @@ class DBStore:
 
 class Twitter:
 	"""Twitter API communication class."""
-	check_rate_limit = False
-	min_available_api_requests = 10
+	check_rate_limit = True
+	rate_limit_checking_interval = 500 # in requests
+	min_available_api_requests = 100 # basicly for unlimited (=20k requests/h)
+	recorded_requests = 0 # don't change, it's for counting
 	rate_checking_sleep = 120
 	request_sleep = 0
 	errors_sleep = 5
@@ -226,7 +228,7 @@ class Twitter:
 			if data == False:
 				Logger().debug('Got nothing while checking rate limit, assuming status is ok')
 				return
-			elif data['remaining_hits'] > self.min_available_api_requests:
+			elif data['remaining_hits'] > self.min_available_api_requests+self.rate_limit_checking_interval:
 				Logger().debug('Twitter api rate limit checked: %d requests remaining' % data['remaining_hits'])
 				return
 			else:
@@ -241,7 +243,7 @@ class Twitter:
 				if self.request_sleep > 0:
 					Logger().debug('Sleeping for %d seconds before request' % self.request_sleep)
 					time.sleep(self.request_sleep)
-				if self.check_rate_limit and not unlimited:
+				if self.check_rate_limit and self.recorded_requests % self.rate_limit_checking_interval == 0 and not unlimited:
 					self.check_hourly_limit()
 				jsondata = self._get_api_data(url)
 				data = json.loads(jsondata)
@@ -272,6 +274,9 @@ class Twitter:
 			except:
 				Logger().warning('Something went wrong while getting twitter api answer')
 				time.sleep(self.errors_sleep)
+			finally:
+				if not unlimited:
+					self.recorded_requests += 1
 
 
 class BasicAuthTwitterAPI(Twitter):
@@ -343,7 +348,8 @@ class BasicAuthTwitterAPI(Twitter):
 class OAuthTwitterAPI(Twitter):
 
 	check_rate_limit = True
-	min_requests_to_process = 20
+	min_available_api_requests = 20
+	rate_limit_checking_interval = 1
 
 	def __init__(self, user, oauth_token, oauth_token_secret, consumer):
 		self.__init_common(user, oauth_token, oauth_token_secret, consumer)
@@ -484,10 +490,13 @@ class Unfollowr:
 		try:
 			with open(self.skiplist_file) as skiplist_file:
 				for user_id in skiplist_file:
-					self.skiplist.add(int(user_id))
+					try:
+						self.skiplist.add(int(user_id))
+					except:
+						pass # allow empty/incorrect lines in skiplist
 		except:
 			Logger().warning('Couldn\'t open skiplist file! It\'s optional, don\'t worry')
-		Logger().debug('Current skiplist: %s' % str(self.skiplist))
+		Logger().debug('Refreshed skiplist. Current: %s' % str(self.skiplist))
 
 	def start(self):
 		"""Main application loop"""
@@ -601,7 +610,7 @@ class Unfollowr:
 		if os.path.exists(os.path.join(os.path.dirname(__file__), 'oauth', str(user_id)+'.oauth')):
 			user_twitter_api = OAuthTwitterAPI(user_id, self.oauth_consumer)
 			if user_twitter_api.verify_credentials() != False:
-				if user_twitter_api.get_remaining_hits() > OAuthTwitterAPI.min_requests_to_process:
+				if user_twitter_api.get_remaining_hits() > OAuthTwitterAPI.min_available_api_requests:
 					Logger().warning('Using OAuth to get followers of %s' % user_id)
 					user_followers = user_twitter_api.get_followers(user_id)
 					if user_followers != False:
